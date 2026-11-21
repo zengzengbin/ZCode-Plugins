@@ -21,6 +21,7 @@ description: 排查 ZCode 自动命名不触发、标题异常、模型错误和
 | unreachable / connection_failed / desktop_offline | 公共 debug 分别检查任务、健康、连接与模式 |
 | remote_workspace_busy | 手机远端工作区占用，等用户主动切回 |
 | bridge_timeout / rpc_protocol_error | 核对版本和原窗口，不重试已提交写操作 |
+| busy | 0.4.5 起由 `worker-lock.sqlite` 事务串行并自动回收失效锁；持续 busy 时核对锁内 PID 是否仍存活，不直接删除数据库 |
 | stale_result / outdated_event | 内容、运行状态或标题已变化，候选被丢弃 |
 | index_title_mismatch / host_title_mismatch | 标题存储不一致；不直接写库，明确授权后经官方改名链路对齐。宿主 CronCreate 冻结标题（命中会话内成功 CronCreate 的 input.title）会命中冻结放行并由命名层接管，无需人工对齐 |
 

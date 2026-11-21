@@ -1,0 +1,36 @@
+{
+  "topic": "suian-zcode-title 命名 worker 失效锁自动回收",
+  "date": "2026-11-22",
+  "baselineBefore": {
+    "tests": 133,
+    "result": "pass",
+    "log": "完整基线 133 项通过；NODE_NO_WARNINGS=1 用于避免 Node 实验警告混入 CLI stderr JSON"
+  },
+  "redGreenLog": [
+    {
+      "feature": "旧 worker.lock 永久 busy",
+      "red": "新增 CLI 契约在旧实现上退出码 1，无法进入预期的网关配置检查",
+      "green": "旧文件锁仅在超龄且 PID 不存活时清理；真实 CLI 集成通过"
+    },
+    {
+      "feature": "并发接管与释放归属",
+      "red": "首版文件改名方案出现两个并发获胜者，Windows 还会对活动文件 rename 报 EPERM；未沿用该方案",
+      "green": "改为 Node 24 内置 SQLite BEGIN IMMEDIATE 事务，8 个并发接管仅 1 个获胜；token 条件释放通过"
+    }
+  ],
+  "machineVerified": [
+    "锁专项 8 项通过：互斥、死进程接管、活进程保护、旧文件迁移、token 归属、并发单胜、释放竞争让位、时钟回拨",
+    "suian-zcode-title 全量 143 项通过，包含旧版文件锁和 SQLite 死进程锁的真实 CLI 接管",
+    "仓库发布工具串行 61 项通过；并行运行存在 Windows 临时目录清理竞争，与本次代码无关",
+    "title 0.4.5 发布构建与 release-orchestrate 契约通过；打包 CLI 烟测接管残留 SQLite 锁并释放"
+  ],
+  "releaseCandidate": {
+    "pluginVersion": "0.4.5",
+    "buildId": "c7e178431928229a7d75ea24bbfe99b60d40cbf4573d9a7edf1b3be452220fea",
+    "zipSha256": "7b12262821a4c8f7c319084c847345186d4bf25f5f6df8563027606d55edd2b5"
+  },
+  "pendingUserAcceptance": [
+    "安装 title 0.4.5 后执行 status / doctor / probe，并以真实 Stop 验证自动命名"
+  ],
+  "secrets": "无凭据、会话标识或本机用户信息写入证据"
+}

@@ -1,10 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {spawn,spawnSync,execFileSync} from "node:child_process";
+import {DatabaseSync} from "node:sqlite";
 import {once} from "node:events";
 import {createServer} from "node:http";
 import {WebSocketServer} from "../../suian-zcode-common/node_modules/ws/wrapper.mjs";
-import {mkdtempSync,mkdirSync,rmSync,writeFileSync,readFileSync,existsSync} from "node:fs";
+import {mkdtempSync,mkdirSync,rmSync,writeFileSync,readFileSync,existsSync,utimesSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {fileURLToPath} from "node:url";
@@ -255,6 +256,38 @@ test("probe 网关未配置时不建立连接且尊重共享锁",()=>{
     const busy=spawnSync(process.execPath,[cli,"probe","--config",config],{encoding:"utf8",input:JSON.stringify({session_id:"sess_probe_case",cwd:"D:\\fixture"}),windowsHide:true,env});
     assert.equal(busy.status,1);
     assert.ok(JSON.parse(busy.stdout).error.includes("busy"),"持锁时 probe 应让位给命名进程");
+  } finally {rmSync(root,{recursive:true});}
+});
+test("超龄损坏锁自动回收，后续命令不再永久 busy",()=>{
+  const root=mkdtempSync(join(tmpdir(),"z-title-stale-lock-cli-")),state=join(root,"state"),config=join(root,"config.json");
+  try {
+    mkdirSync(state);
+    const lockPath=join(state,"worker.lock");
+    writeFileSync(lockPath,"{}");
+    const old=new Date(Date.now()-60000);
+    utimesSync(lockPath,old,old);
+    writeFileSync(config,JSON.stringify({dataDir:state,gatewayConfigPath:join(root,"missing-gateway.json")}));
+    const run=spawnSync(process.execPath,[cli,"probe","--config",config],{encoding:"utf8",input:JSON.stringify({session_id:"sess_stale_lock",cwd:"D:\\fixture"}),windowsHide:true});
+    assert.equal(run.status,0,run.stderr);
+    assert.equal(JSON.parse(run.stdout).reasonCode,"gateway_not_configured");
+    assert.equal(existsSync(lockPath),false,"命令结束后应释放接管的锁");
+  } finally {rmSync(root,{recursive:true});}
+});
+test("SQLite 中残留的死进程锁经真实 CLI 自动接管",()=>{
+  const root=mkdtempSync(join(tmpdir(),"z-title-stale-sqlite-cli-")),state=join(root,"state"),config=join(root,"config.json"),dbPath=join(state,"worker-lock.sqlite");
+  try {
+    mkdirSync(state);
+    const db=new DatabaseSync(dbPath);
+    db.exec("CREATE TABLE worker_lock(id INTEGER PRIMARY KEY CHECK(id=1),token TEXT NOT NULL,pid INTEGER NOT NULL,started_at INTEGER NOT NULL,command TEXT,session_id TEXT)");
+    db.prepare("INSERT INTO worker_lock(id,token,pid,started_at,command) VALUES(1,'stale',99999999,0,'run')").run();
+    db.close();
+    writeFileSync(config,JSON.stringify({dataDir:state,gatewayConfigPath:join(root,"missing-gateway.json")}));
+    const run=spawnSync(process.execPath,[cli,"probe","--config",config],{encoding:"utf8",input:JSON.stringify({session_id:"sess_stale_sqlite",cwd:"D:\\fixture"}),windowsHide:true});
+    assert.equal(run.status,0,run.stderr);
+    assert.equal(JSON.parse(run.stdout).reasonCode,"gateway_not_configured");
+    const verify=new DatabaseSync(dbPath);
+    assert.equal(verify.prepare("SELECT COUNT(*) AS count FROM worker_lock").get().count,0);
+    verify.close();
   } finally {rmSync(root,{recursive:true});}
 });
 test("lock/unlock/policy 写公共策略：查询、幂等、读回复核与落盘格式",()=>{

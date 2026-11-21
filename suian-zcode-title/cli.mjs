@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import {readFile,mkdir,open,writeFile,rename,unlink,appendFile,stat} from "node:fs/promises";
+import {readFile,mkdir,writeFile,rename,appendFile,stat} from "node:fs/promises";
 import {execFile} from "node:child_process";
 import {promisify} from "node:util";
 import {homedir} from "node:os";
@@ -14,12 +14,13 @@ import {resolvePluginLayout} from "./release-layout.mjs";
 import {toastBodyFor,reportPromptRecoveryToast} from "./toast.mjs";
 import {ensureToastAppId,AUMID,PROTOCOL} from "./installer.mjs";
 import {runDoctor} from "./doctor.mjs";
+import {acquireWorkerLock} from "./worker-lock.mjs";
 
 const args=process.argv.slice(2);
 if(args.includes("--help")||!args.length) {
    console.log("用法：node cli.mjs run [--apply] [--config 文件]\n      node cli.mjs doctor|models|probe|status|enable|disable|auth|unauth [--config 文件]\n      node cli.mjs lock|unlock|policy [--config 文件]（固定/解除固定/查询会话标题策略；先校验目标会话存在）\nstdin JSON：session_id、workspace_path（或 cwd）、可选 user_message_id。\n原 Host 调用统一走公共网关；请先按公共 skill 安装或重载。auth / unauth 保留为旧凭据管理入口，不参与网关调用。\n网关类失败弹原生 Toast（2 小时冷却），设 OIL_ZCODE_TITLE_DISABLE_TOAST=1 静音。");
 } else {
-  let backend,lease,leasePath,dataDir,command,event;
+  let backend,lease,dataDir,command,event;
   const startedAt=Date.now();
   try {
     command=args[0];
@@ -55,10 +56,8 @@ if(args.includes("--help")||!args.length) {
       // 公共定位失败必须先于 mkdir、建锁等本地副作用；enable/disable 是纯本地命令不依赖 common。
       if(command!=="enable"&&command!=="disable")await commonRuntime(anchor);
       await mkdir(dataDir,{recursive:true});
-      const requestedLeasePath=join(dataDir,"worker.lock");
-      try {lease=await open(requestedLeasePath,"wx");leasePath=requestedLeasePath;}
-      catch(error) {if(error.code==="EEXIST")throw new Error("busy：另一个命名进程持有共享远控连接");throw error;}
-      await lease.writeFile(JSON.stringify({pid:process.pid,startedAt:new Date().toISOString()}));
+      lease=await acquireWorkerLock({dataDir,command,sessionId:event.session_id??event.sessionId});
+      if(!lease.acquired)throw new Error("busy：另一个命名进程持有共享远控连接");
       let prompt;
       if(command==="run") {
         const limits=snapshotLimits(config);
@@ -193,7 +192,7 @@ if(args.includes("--help")||!args.length) {
     process.exitCode=1;
   } finally {
     try {await backend?.close();}
-    finally {if(lease) {await lease.close();await unlink(leasePath);}}
+    finally {if(lease?.acquired)await lease.release();}
   }
 }
 

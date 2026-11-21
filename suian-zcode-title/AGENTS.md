@@ -46,7 +46,7 @@ node .\cli.mjs policy --config .\config.local.json      # 只读查询目标会�
 
 ### 链路概要
 
-1. Stop Hook（hook.mjs）收到事件：stop_hook_active:true 跳过；延迟 8 秒等持久化收尾后派发 cli.mjs run --apply，只传会话元数据，不解密或注入链接。worker.lock 串行，busy 让位下一轮。宿主在创建会话时快照 hooks，新条目只对新会话生效。
+1. Stop Hook（hook.mjs）收到事件：stop_hook_active:true 跳过；延迟 8 秒等持久化收尾后派发 cli.mjs run --apply，只传会话元数据，不解密或注入链接。`worker-lock.sqlite` 以事务串行 worker，超龄且 PID 不存活的锁自动接管，释放按 token 校验归属；旧 `worker.lock` 仅在确认失效后清理。宿主在创建会话时快照 hooks，新条目只对新会话生效。
 2. 只读查询任务索引与 CLI SQLite 双库，校验工作区与标题一致。
 3. 按持久化 `session.revert` 裁剪回退分支：优先使用 `branchCutAfterMessageID` 拼接保留前缀与切点之后的新消息，兼容旧 `createdMessageID`；切点不存在时只保留已登记前缀。复用官方可见消息规则；用户文本每轮上限 1,200 字符、最初目标 800，取最近三轮。助手正文默认 2,000 字符，超额保留首尾；后台任务通知触发的可见回复归入通知前最近真人有效轮次。
 4. 经公共网关附着原 Host（握手短超时 8s，失败按 stage/reasonCode 分类），model-selection.getView 校验模型档位后调 zcode-agent.generateWorkspaceText。仅生成使用独立工作区身份，完成、失败或超时后释放辅助运行时，不把模型活动记到现有会话。真实目录、模型选择及改名目标不变。旧网关明确要求重载，不回退官方 terminal。
@@ -71,6 +71,7 @@ node .\cli.mjs policy --config .\config.local.json      # 只读查询目标会�
 | 文件 | 职责 |
 | --- | --- |
 | cli.mjs | 命令入口：stdin 事件、配置、共享锁、结果与日志；status/enable/disable/auth/unauth/lock/unlock/policy |
+| worker-lock.mjs | SQLite 事务锁、失效锁接管、旧文件锁迁移与 token 归属释放 |
 | hook.mjs | Stop Hook 派发器：续跑保护、会话元数据、8 秒延迟、后台 worker（worker 为同目录 cli 入口，源码与发布形态同构） |
 | naming.mjs | 命名决策、去重、手动锁定保护、写前写后复核 |
 | backend.mjs | 只读双库与原 Host 服务适配 |
